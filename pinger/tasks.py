@@ -1,9 +1,9 @@
 import datetime
 import hashlib
 import json
-import logging
 import time
 from datetime import timezone as tz
+
 from http.cookiejar import http2time
 
 import requests
@@ -297,7 +297,7 @@ def corporation_fuel_check(self, corporation_id):
             continue # No Fuel blocks, so we can't calculate duration. Use eve notifications instead.
         fuel_expires = timezone.now() + fuel_duration
 
-        daysLeft = (fuel_expires - datetime.datetime.now(timezone.utc)).days
+        daysLeft = (fuel_expires - datetime.datetime.now(tz.utc)).days
         
         if daysLeft < 15:
             if 0 <= daysLeft < 2:
