@@ -237,8 +237,8 @@ def create_structure_from_starbase(starbase: Starbase, fuel_expires: timezone.da
         reinforce_hour=20,
         state="unknown",
         structure_id=starbase.starbase_id,
-        system_id=starbase.system.system_id,
-        type_id=starbase.type_name.type_id,
+        system_id=starbase.system.id,
+        type_id=starbase.type_name.id,
         system_name=starbase.system,
     )
     structure.save()
