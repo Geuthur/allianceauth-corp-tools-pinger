@@ -1,19 +1,21 @@
 import datetime
 import hashlib
 import json
-import logging
 import time
 from datetime import timezone as tz
+
 from http.cookiejar import http2time
 
 import requests
 from celery import shared_task
 from corptools.models import (
-    CharacterAudit, CorpAsset, CorporationAudit, Structure,
+    CharacterAudit, CorpAsset, CorporationAudit, Starbase, Structure
 )
 from corptools.task_helpers import sanitize_notification_type
 from corptools.tasks.utils import esi_error_retry
 from oauthlib.oauth2.rfc6749.errors import InvalidGrantError
+
+from allianceauth.services.hooks import get_extension_logger
 
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
@@ -30,6 +32,7 @@ from pinger.models import (
     DiscordWebhook, FuelPingRecord, Ping, PingerConfig,
     _webhook_passes_filters,
 )
+from pinger.helpers.starbase import starbase_fuel_duration
 
 from . import notifications
 from .models import Notification
@@ -45,7 +48,7 @@ TASK_PRIO = 3
 LOOK_BACK_HOURS = 6 #* 15
 
 
-logger = logging.getLogger(__name__)
+logger = get_extension_logger(__name__)
 
 alliances = []
 corporations = []
@@ -219,12 +222,53 @@ def fuel_ping_builder(structure, days, message):
         # logger.info("already pinged: %s %s"% (_structure,_pingText))
         return False
 
+def create_structure_from_starbase(starbase: Starbase, fuel_expires: timezone.datetime, days, message):
+    """
+        Works around the fact that starbases are not structures but we want to ping them like structures.
+    """
+    # touch the cache to avoid hitting the database repeatedly for starbases with fuel blocks.
+    cached_message = cache.get(f"ct-starbase-pinger-{starbase.starbase_id}-{message}", False)
+    if cached_message is True:
+        logger.warning(f"Skipping fuel ping for starbase {starbase.starbase_id} because it was recently pinged with message '{message}'")
+        return # Skip Ping cause it already pinged recently
+    
+    structure = Structure(
+        name=starbase.name,
+        corporation=starbase.corporation,
+        fuel_expires=fuel_expires,
+        profile_id=0,
+        reinforce_hour=20,
+        state="unknown",
+        structure_id=starbase.starbase_id,
+        system_id=starbase.system.id,
+        type_id=starbase.type_name.id,
+        system_name=starbase.system,
+    )
+    structure.save()
+    fuel_ping_builder(structure, days, message)
+    # cache the fuel duration for 7 days to avoid hitting the database repeatedly for starbases with fuel blocks.
+    cache.set(key=f"ct-starbase-pinger-{starbase.starbase_id}-{message}", value=True, timeout=60*60*24*7)
+    # delete the structure after we use it for the fuel ping builder, we don't want to keep it around.
+    logger.warning(f"Deleting temporary structure for starbase {starbase.starbase_id} after fuel ping.")
+    try:
+        fuels = FuelPingRecord.objects.filter(structure__structure_id=starbase.starbase_id)
+        for fuel in fuels:
+            fuel.delete()
+        structures = Structure.objects.filter(structure_id=starbase.starbase_id)
+        for struct in structures:
+            struct.delete()
+    except Exception as e:
+        logger.warning(f"Failed to delete temporary structure for starbase {starbase.starbase_id}: {e}")
+    return
 
 @shared_task(bind=True, base=QueueOnce, max_retries=None)
 def corporation_fuel_check(self, corporation_id):
     logger.info(
         f"PINGER: FUEL Sending Starting Fuel Checks for {corporation_id}")
     fuel_structures = Structure.objects.filter(
+        corporation__corporation__corporation_id=corporation_id)
+
+    fuel_starbase = Starbase.objects.filter(
         corporation__corporation__corporation_id=corporation_id)
 
     for struct in fuel_structures:
@@ -248,6 +292,23 @@ def corporation_fuel_check(self, corporation_id):
                 last_ping_lo_level__isnull=True, structure=struct)
             if old.exists():
                 old.delete()
+
+    for starbase in fuel_starbase:
+        daysLeft = 0
+        fuel_duration = starbase_fuel_duration(starbase=starbase)
+        if fuel_duration is None:
+            continue # No Fuel blocks, so we can't calculate duration. Use eve notifications instead.
+        fuel_expires = timezone.now() + fuel_duration
+
+        daysLeft = (fuel_expires - datetime.datetime.now(tz.utc)).days
+        
+        if daysLeft < 15:
+            if 0 <= daysLeft < 2:
+                create_structure_from_starbase(starbase, fuel_expires, daysLeft, "Critical Fuel! :ambulance:")
+            elif 2 <= daysLeft < 3:
+                create_structure_from_starbase(starbase, fuel_expires, daysLeft, "Critical Fuel! :ambulance: :eyes:")
+            elif 3 <= daysLeft < 8:
+                create_structure_from_starbase(starbase, fuel_expires, daysLeft, "Low Fuel")
 
 
 def get_lo_key(corp_id):
