@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 def _webhook_passes_filters(hook, corp_id=None, alli_id=None, region_id=None):
-    if corp_id is not None:
-        corporations = hook.corporation_filter.all().values_list("corporation_id", flat=True)
-        if len(corporations) > 0 and corp_id not in corporations:
-            return False
-    if alli_id is not None:
-        alliances = hook.alliance_filter.all().values_list("alliance_id", flat=True)
-        if len(alliances) > 0 and alli_id not in alliances:
+    corporations = hook.corporation_filter.all().values_list("corporation_id", flat=True) if corp_id is not None else []
+    alliances = hook.alliance_filter.all().values_list("alliance_id", flat=True) if alli_id is not None else []
+
+    if len(corporations) > 0 or len(alliances) > 0:
+        corp_match = len(corporations) > 0 and corp_id in corporations
+        alli_match = len(alliances) > 0 and alli_id in alliances
+        if not corp_match and not alli_match:
             return False
     if region_id is not None:
         regions = hook.region_filter.all().values_list("id", flat=True)

@@ -5,7 +5,6 @@ source =
 
 omit =
     */pinger/migrations/*
-    */pinger/tasks.py
     */tests/*
     */.tox/*
     */bin/*
