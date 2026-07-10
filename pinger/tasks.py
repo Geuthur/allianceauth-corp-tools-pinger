@@ -437,8 +437,10 @@ def corporation_lo_check(self, corporation_id):
 
             logger.info(f"PINGER: LO Webhooks {webhooks.count()}")
 
+            alli_id = corp.alliance.alliance_id if corp.alliance else None
+
             for hook in webhooks:
-                if not _webhook_passes_filters(hook, corp_id=corporation_id):
+                if not _webhook_passes_filters(hook, corp_id=corporation_id, alli_id=alli_id):
                     logger.info(f"PINGER: LO  Skipped Corp {corporation_id}")
                     continue
 
@@ -451,7 +453,7 @@ def corporation_lo_check(self, corporation_id):
                 )
                 p.send_ping()
 
-                return embed
+            return embed
 
 
 def get_gas_key(corp_id):
@@ -588,8 +590,10 @@ def corporation_gas_check(self, corporation_id):
             )
             logger.info(f"PINGER: FUEL Webhooks {webhooks.count()}")
 
+            alli_id = corp.alliance.alliance_id if corp.alliance else None
+
             for hook in webhooks:
-                if not _webhook_passes_filters(hook, corp_id=corporation_id):
+                if not _webhook_passes_filters(hook, corp_id=corporation_id, alli_id=alli_id):
                     logger.info(f"PINGER: GAS  Skipped Corp_ID:{corporation_id}")
                     continue
 
@@ -602,7 +606,7 @@ def corporation_gas_check(self, corporation_id):
                 )
                 p.send_ping()
 
-                return embed
+            return embed
 
 
 @shared_task(bind=True, base=QueueOnce, max_retries=None)
